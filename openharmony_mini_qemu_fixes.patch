@@ -1,0 +1,98 @@
+From: OpenHarmony Developer <dev@openharmony.com>
+Date: Thu, 4 Apr 2026 12:00:00 +0800
+Subject: [PATCH] OpenHarmony Mini System - Fix QEMU Lockup and enable test framework
+
+This patch fixes the QEMU Lockup error caused by UNALIGNFAULT
+and enables the kernel test framework for LiteOS-M.
+
+Signed-off-by: OpenHarmony Developer <dev@openharmony.com>
+---
+
+=== 1. los_interrupt.c - Fix UNALIGNFAULT ===
+--- a/kernel/liteos_m/arch/arm/cortex-m4/gcc/los_interrupt.c
++++ b/kernel/liteos_m/arch/arm/cortex-m4/gcc/los_interrupt.c
+@@ -28,6 +28,10 @@
+ {
+     HalHwiInit();
++
++    *(volatile UINT32 *)OS_NVIC_CCR |= (DIV0FAULT);
++    *(volatile UINT32 *)OS_NVIC_CCR &= ~(UNALIGNFAULT);
++
+     return;
+ }
+
+=== 2. xts_test.c - Conditional network test ===
+--- a/kernel/liteos_m/testsuites/unittest/xts/xts_test.c
++++ b/kernel/liteos_m/testsuites/unittest/xts/xts_test.c
+@@ -30,6 +30,7 @@
+ 
+ #include "xts_test.h"
++#include "los_config.h"
+ 
+ uint32_t GetRandom(uint32_t max)
+@@ -45,6 +46,8 @@ void XtsTestSuite(void)
+     MathFuncTest();
+     MemFuncTest();
++#if (LOSCFG_NET_LWIP == 1)
+     ActsNetTest();
++#endif
+     PthreadFuncTest();
+     SchedApiFuncTest();
+     SysApiFuncTest();
+
+=== 3. xts/BUILD.gn - Conditional network test deps ===
+--- a/kernel/liteos_m/testsuites/unittest/xts/BUILD.gn
++++ b/kernel/liteos_m/testsuites/unittest/xts/BUILD.gn
+@@ -43,5 +43,8 @@ deps = [
+   "sched:sched_test",
+   "sys:system_test",
+   "time:time_test",
+ ]
++if (defined(LOSCFG_NET_LWIP) && LOSCFG_NET_LWIP) {
++  deps += [ "net:net_test" ]
++}
+
+=== 4. board/BUILD.gn - Conditional network driver ===
+--- a/device/qemu/arm_mps2_an386/liteos_m/board/BUILD.gn
++++ b/device/qemu/arm_mps2_an386/liteos_m/board/BUILD.gn
+@@ -10,6 +10,10 @@ sources = [
+   "libc/dprintf.c",
+   "main.c",
+   "startup.s",
+ ]
++if (defined(LOSCFG_NET_LWIP) && LOSCFG_NET_LWIP) {
++  sources += [ "driver/net/lan9118_eth_drv.c" ]
++  include_dirs += [ "driver/net/" ]
++}
+
+=== 5. main.c - Conditional network init ===
+--- a/device/qemu/arm_mps2_an386/liteos_m/board/main.c
++++ b/device/qemu/arm_mps2_an386/liteos_m/board/main.c
+@@ -12,9 +12,14 @@
+ #include "los_config.h"
+ #include "uart.h"
+ #include "los_debug.h"
++#if (LOSCFG_NET_LWIP == 1)
+ #include "lan9118_eth_drv.h"
++#endif
+ 
+ int main(void)
+ {
+   Uart0RxIrqRegister();
++#if (LOSCFG_NET_LWIP == 1)
+   NetInit();
++#endif
+   return 0;
+ }
+
+=== 6. debug.config - Enable kernel test and fix unaligned exception ===
+--- a/vendor/ohemu/qemu_mini_system_demo/kernel_configs/debug.config
++++ b/vendor/ohemu/qemu_mini_system_demo/kernel_configs/debug.config
+@@ -1,2 +1,4 @@
+ LOSCFG_PLATFORM_QEMU_ARM_VIRT_CM4=y
+ LOSCFG_SHELL=y
++LOSCFG_ARCH_UNALIGNED_EXC=n
++LOSCFG_KERNEL_TEST=y
+
+-- 
+2.0.0
